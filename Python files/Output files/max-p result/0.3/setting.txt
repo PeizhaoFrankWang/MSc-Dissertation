@@ -1,0 +1,3 @@
+threshold = 0.3*625=187.5 
+where, number of spatial units = 625
+top_n = 3
