@@ -1,0 +1,457 @@
+---
+title: '1'
+author: "Peizhao Wang"
+date: "2022/6/15"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#library a bunch of packages we may (or may not) use - install them first if not installed already. 
+library(tidyverse)
+library(tmap)
+library(geojsonio)
+library(plotly)
+library(rgdal)
+library(broom)
+library(mapview)
+library(crosstalk)
+library(sf)
+library(sp)
+library(spdep)
+library(car)
+library(fs)
+library(janitor)
+library(ggplot2)
+library(spatstat)
+library(broom)
+library(tidymodels)
+library(usethis)
+library(corrr)
+```
+
+```{r}
+library(mosaic)  # standardizing variables
+```
+
+
+```{r}
+LondonWardProfiles <- read_csv(here::here('data','out2.csv'), 
+                               na = c("", "NA", "n/a"), 
+                               col_names = TRUE)
+
+```
+
+```{r}
+Londonwards <- st_read(here::here("data", "statistical-gis-boundaries-london", "statistical-gis-boundaries-london","ESRI", "London_Ward_CityMerged.shp"))
+```
+
+```{r}
+qtm(Londonwards)
+```
+
+```{r}
+#check all of the columns have been read in correctly
+Datatypelist <- LondonWardProfiles %>% 
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+Datatypelist
+```
+```{r}
+#merge boundaries and data
+LonWardProfiles <- Londonwards%>%
+  left_join(.,
+            LondonWardProfiles, 
+            by = c("GSS_CODE" = "New Code"))
+```
+
+```{r}
+#let's map our dependent variable to see if the join has worked:
+tmap_mode("plot")
+qtm(LonWardProfiles, 
+    fill = "Children_Poverty_Rate", 
+    borders = NULL,  
+    fill.palette = "Blues")
+```
+
+```{r}
+symbox(~ Children_Poverty_Rate, 
+       LonWardProfiles, 
+       na.rm=T,
+       powers=seq(-3,3,by=.5))
+```
+```{r}
+symbox(~ E1, 
+       LonWardProfiles, 
+       na.rm=T,
+       powers=seq(-3,3,by=.5))
+
+```
+
+
+
+```{r}
+library(corrr)
+
+Correlation <- LonWardProfiles %>%
+  st_drop_geometry()%>%
+  dplyr::select(Children_Poverty_Rate,
+         E1,
+         E2,
+         E3,
+         E4,
+         E5,
+         E6,
+         HD1,
+         HD2,
+         L1,
+         L2,
+         O,
+         P1,
+         P2,
+         P3,
+         Q)%>%
+    correlate() %>%
+  # just focus on Children_Poverty_Rate
+  focus(-Children_Poverty_Rate, mirror = TRUE) 
+
+
+#visualise the correlation matrix
+rplot(Correlation)
+```
+
+```{r}
+Datatypelist
+```
+
+
+
+```{r}
+Regressiondata1<- LonWardProfiles%>%
+  st_drop_geometry()%>%
+
+  dplyr::select(Children_Poverty_Rate, 
+         E1,
+         E2,
+         E3,
+         E4,
+         E5,
+         E6,
+         HD1,
+         HD2,
+         L1,
+         L2,
+         O,
+         P1,
+         P2,
+         P3,
+         Q)
+```
+
+
+
+```{r}
+model1 <- LonWardProfiles %>%
+  lm(Children_Poverty_Rate ~ 
+       E3+
+       E4+
+       E6+
+       O+
+       Q, data =.)
+
+#show the summary of those outputs
+tidy(model1)
+```
+```{r}
+glance(model1)
+```
+```{r}
+res1 <- resid(model1)
+```
+
+```{r}
+plot(fitted(model1), res1)
+```
+
+
+
+```{r}
+position <- c(10:24)
+
+Correlation_all<- LonWardProfiles %>%
+  st_drop_geometry()%>%
+  dplyr::select(position)%>%
+    correlate()
+
+rplot(Correlation_all)
+```
+# using the stepwise regression dimension reduced data
+```{r}
+Regressiondata2<- LonWardProfiles%>%
+  dplyr::select(Children_Poverty_Rate,
+       E3,
+       E4,
+       E6,
+       O,
+       Q)
+
+```
+
+```{r}
+position <- c(2:6)
+
+Correlation_all<- Regressiondata2 %>%
+  st_drop_geometry()%>%
+  dplyr::select(position)%>%
+    correlate()
+
+rplot(Correlation_all)
+```
+
+
+
+```{r}
+model2 <- LonWardProfiles %>%
+  lm(Children_Poverty_Rate ~ 
+       scale(E3)+
+       scale(E4)+
+       scale(E6)+
+       scale(O)+
+       scale(Q), data =.)
+
+#show the summary of those outputs
+tidy(model2)
+```
+# all variables are reliable
+
+```{r}
+glance(model2)
+```
+
+```{r}
+tidy(durbinWatsonTest(model2))
+```
+# The Durbin-Watson Test result is not significant.
+
+```{r}
+res <- resid(model2)
+```
+
+```{r}
+plot(fitted(model2), res)
+```
+
+# The statistic is very close to 2, indicating very small positive autocorrelation.
+## Because the p-value is less than 0.05, it cannot indicate that there is autocorrelation
+
+```{r}
+droped_London_poverty_merged_file <-     LonWardProfiles %>%
+  drop_na()
+```
+
+```{r}
+droped_London_poverty_merged_file_with_residual <- droped_London_poverty_merged_file %>%
+  mutate(.,res)
+```
+
+
+```{r}
+tmap_mode("view")
+tm_shape(droped_London_poverty_merged_file_with_residual) +
+  tm_polygons("res",
+              palette = "RdYlBu")
+```
+# residuals are mostly from -5 to 5, following a normal distribution. Meaning that the regression is feasible.
+
+
+```{r}
+#calculate the centroids of all Wards in London
+coordsW <- droped_London_poverty_merged_file_with_residual%>%
+  st_centroid()%>%
+  st_geometry()
+
+plot(coordsW)
+```
+
+```{r}
+#Now we need to generate a spatial weights matrix 
+#(remember from the lecture a couple of weeks ago). 
+#We'll start with a simple binary matrix of queen's case neighbours
+
+LWard_nb <- droped_London_poverty_merged_file_with_residual %>%
+  poly2nb(., queen=T)
+
+#or nearest neighbours
+knn_wards <-coordsW %>%
+  knearneigh(., k=4)
+
+LWard_knn <- knn_wards %>%
+  knn2nb()
+
+#plot them
+plot(LWard_nb, st_geometry(coordsW), col="red")
+```
+test Moran's I  to check spatial autocorrelation
+```{r}
+Lward.lw <- LWard_nb %>%
+  nb2listw(., style="C")
+```
+
+```{r}
+I_LWard_Global_Density <- droped_London_poverty_merged_file_with_residual %>%
+  pull(Children_Poverty_Rate) %>%
+  as.vector()%>%
+  moran.test(., Lward.lw)
+
+I_LWard_Global_Density
+```
+The statistic value is more close to 1 other than -1. This means there are cluster with similar values. 
+
+
+```{r}
+#create a spatial weights matrix object from these weights
+Lward.queens_weight <- LWard_nb %>%
+  nb2listw(., style="W")
+
+Lward.knn_4_weight <- LWard_knn %>%
+  nb2listw(., style="W")
+```
+
+```{r}
+Queen <- droped_London_poverty_merged_file_with_residual %>%
+  st_drop_geometry()%>%
+  dplyr::select(res)%>%
+  pull()%>%
+  moran.test(., Lward.queens_weight)%>%
+  tidy()
+```
+
+
+#to test the local spatail regression models. Which might has a better performance.
+
+
+```{r}
+library(spgwr)
+
+coordsW2 <- st_coordinates(coordsW)
+
+droped_London_poverty_merged_file_with_residual2 <- cbind(droped_London_poverty_merged_file_with_residual,coordsW2)
+```
+
+
+
+```{r}
+GWRbandwidth <- gwr.sel(Children_Poverty_Rate ~ 
+       scale(E3)+
+       scale(E4)+
+       scale(E6)+
+       scale(O)+
+       scale(Q),   
+                  data = droped_London_poverty_merged_file_with_residual2, 
+                        coords=cbind(droped_London_poverty_merged_file_with_residual2$X, droped_London_poverty_merged_file_with_residual2$Y),
+                  adapt=T)
+```
+
+```{r}
+GWRbandwidth
+```
+
+```{r}
+#run the gwr model
+gwr.model = gwr(Children_Poverty_Rate ~ 
+       scale(E3)+
+       scale(E4)+
+       scale(E6)+
+       scale(O)+
+       scale(Q), 
+                  data = droped_London_poverty_merged_file_with_residual2, 
+                coords=cbind(droped_London_poverty_merged_file_with_residual2$X, droped_London_poverty_merged_file_with_residual2$Y), 
+                adapt=GWRbandwidth,
+                #matrix output
+                hatmatrix=TRUE,
+                #standard error
+                se.fit=TRUE)
+
+#print the results of the model
+gwr.model
+```
+# The GWR's R-squared value is 0.9826
+# Comparing with other models, GWR comes to have better performance than standardized regression.
+
+```{r}
+results <- as.data.frame(gwr.model$SDF)
+names(results)
+```
+
+
+
+
+
+```{r}
+#attach coefficients to original SF
+
+
+droped_London_poverty_merged_file_with_residual3 <- droped_London_poverty_merged_file_with_residual2 %>%
+  mutate(
+         coefE3 = results$scale.E3.,
+         coefE4 = results$scale.E4.,
+         coefE6 = results$scale.E6.,
+         coefO = results$scale.O.,
+         coefQ = results$scale.Q.)
+```
+
+
+
+
+
+
+```{r}
+tm_shape(droped_London_poverty_merged_file_with_residual3) +
+  tm_polygons(col = "coefE3", 
+              palette = "RdBu", 
+              alpha = 0.5)
+```
+
+
+```{r}
+tm_shape(droped_London_poverty_merged_file_with_residual3) +
+  tm_polygons(col = "coefE4", 
+              palette = "RdBu", 
+              alpha = 0.5)
+```
+
+```{r}
+tm_shape(droped_London_poverty_merged_file_with_residual3) +
+  tm_polygons(col = "coefE6", 
+              palette = "RdBu", 
+              alpha = 0.5)
+```
+
+```{r}
+tm_shape(droped_London_poverty_merged_file_with_residual3) +
+  tm_polygons(col = "coefO", 
+              palette = "RdBu", 
+              alpha = 0.5)
+```
+
+
+```{r}
+tm_shape(droped_London_poverty_merged_file_with_residual3) +
+  tm_polygons(col = "coefQ", 
+              palette = "RdBu", 
+              alpha = 0.5)
+```
+
+
+
+
+
